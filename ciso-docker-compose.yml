@@ -1,0 +1,119 @@
+services:
+  backend:
+    container_name: ciso-backend
+    image: ghcr.io/intuitem/ciso-assistant-community/backend:latest
+    pull_policy: always
+    restart: always
+    environment:
+      - ALLOWED_HOSTS=backend,localhost
+      - CISO_ASSISTANT_URL=https://localhost:8443
+      - DJANGO_DEBUG=True
+      - AUTH_TOKEN_TTL=7200
+    volumes:
+      - ./db:/code/db
+    networks:
+      - ciso-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://backend:8000/api/build || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 100s
+
+  huey:
+   container_name: ciso-huey
+   image: ghcr.io/intuitem/ciso-assistant-community/backend:latest
+   pull_policy: always
+   depends_on:
+     backend:
+       condition: service_healthy
+   restart: always
+   environment:
+     - ALLOWED_HOSTS=backend,localhost
+     - CISO_ASSISTANT_URL=https://localhost:8443
+     - DJANGO_DEBUG=False
+     - AUTH_TOKEN_TTL=7200
+   networks:
+      - ciso-network
+   volumes:
+     - ./db:/code/db
+   entrypoint:
+     - /bin/sh
+     - -c
+     - |
+       poetry run python manage.py run_huey -w 2 --scheduler-interval 60
+
+  frontend:
+    container_name: ciso-frontend
+    environment:
+      - PUBLIC_BACKEND_API_URL=http://backend:8000/api
+      - PUBLIC_BACKEND_API_EXPOSED_URL=https://localhost:8443/api
+      - PROTOCOL_HEADER=x-forwarded-proto
+      - HOST_HEADER=x-forwarded-host
+    image: ghcr.io/intuitem/ciso-assistant-community/frontend:latest
+    pull_policy: always
+    restart: always
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - ciso-network
+
+  caddy:
+    container_name: ciso-caddy
+    image: caddy:2.10.0
+    environment:
+      - CISO_ASSISTANT_URL=https://localhost:8443
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    ports:
+      - 8443:8443
+    volumes:
+      - ./caddy_data:/data
+    command: |
+      sh -c 'echo $$CISO_ASSISTANT_URL "{
+      reverse_proxy /api/* backend:8000
+      reverse_proxy /* frontend:3000
+      tls internal
+      }" > Caddyfile && caddy run'
+    networks:
+      - ciso-network
+
+      
+  dispatcher:
+    container_name: ciso-dispatcher
+    image: docker.sunet.se/ciso-assistant-dispatcher:latest
+    #image: ciso-assistant-dispatcher
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: always
+    environment:
+      - DEBUG=True
+      # CISO Assistant
+      - API_URL=http://backend:8000/api
+      - USER_EMAIL=email
+      - USER_PASSWORD=1234
+      - AUTO_RENEW_SESSION=True
+      - VERIFY_CERTIFICATE=False
+      # Kafka
+      - BOOTSTRAP_SERVERS=redpanda-0:9092
+      - KAFKA_USE_AUTH=False # Set to True to enable authentication to Kafka
+#      - KAFKA_SASL_MECHANISM=SCRAM-SHA-256
+#      - KAFKA_USERNAME=kafka_cisoas
+#      - KAFKA_PASSWORD=<%= @kafka_user_password %>
+      - ERRORS_TOPIC=errors
+      - OBSERVATION_TOPIC=observation
+    networks:
+      - ciso-network
+
+
+networks:
+  ciso-network:
+    name: lis-network
+    external: true
+  lis-network:
+    name: lis-network
+    driver: bridge
