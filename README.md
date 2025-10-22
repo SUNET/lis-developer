@@ -52,8 +52,9 @@ If the CISO `dispatcher` service is configure correctly you can see the `my-grou
 
 There might be needed to configure an ACL to allow the `my-group` consumer group to consume from the `observation` topic.
 
-The docker compose configuration is taken from the Redpanda documentation.
+The docker compose configuration is the `Single Redpanda Broker with Redpanda Console in Docker` taken from the Redpanda documentation.
 
+More info here: https://docs.redpanda.com/current/get-started/docker-compose-labs/
 
 ### 4. Apache Airflow
 
@@ -61,6 +62,7 @@ The docker compose configuration is taken from the Redpanda documentation.
 
 The docker compose configuration is taken from the Airflow documentation.
 
+More info here: https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html 
 
 ## Run
 
