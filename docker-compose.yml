@@ -1,0 +1,17 @@
+---
+# LIS Developer Environment - Root Docker Compose
+# This file orchestrates all services by including the Docker Compose files from subfolders
+
+include:
+  - path: ./airflow/docker-compose.yaml
+    project_directory: ./airflow
+  - path: ./redpanda/docker-compose.yml
+    project_directory: ./redpanda
+  - path: ./ciso/docker-compose.yml
+    project_directory: ./ciso
+
+# Override network configuration to ensure all services use the same network
+networks:
+  default:
+    name: lis-network
+    driver: bridge

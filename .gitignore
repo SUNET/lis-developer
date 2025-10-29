@@ -1,3 +1,14 @@
+# Locally created folders/files when executing Airflow and CISO for the first time
+./airflow/logs/
+./airflow/dags/
+./airflow/plugins/
+./airflow/dag_processor/
+./airflow/.env
+
+./ciso/db/
+./ciso/caddy_data/
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
