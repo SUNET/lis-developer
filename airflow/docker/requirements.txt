@@ -1,0 +1,2 @@
+hittade-client>=0.1.1
+ciso-aac>=0.1.1

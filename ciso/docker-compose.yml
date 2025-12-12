@@ -5,7 +5,7 @@ services:
     pull_policy: always
     restart: always
     environment:
-      - ALLOWED_HOSTS=backend,localhost
+      - ALLOWED_HOSTS=backend,localhost,ciso-caddy
       - CISO_ASSISTANT_URL=https://localhost:8443
       - DJANGO_DEBUG=True
       - AUTH_TOKEN_TTL=7200
@@ -29,7 +29,7 @@ services:
        condition: service_healthy
    restart: always
    environment:
-     - ALLOWED_HOSTS=backend,localhost
+     - ALLOWED_HOSTS=backend,localhost,ciso-caddy
      - CISO_ASSISTANT_URL=https://localhost:8443
      - DJANGO_DEBUG=False
      - AUTH_TOKEN_TTL=7200
@@ -62,8 +62,6 @@ services:
   caddy:
     container_name: ciso-caddy
     image: caddy:2.10.0
-    environment:
-      - CISO_ASSISTANT_URL=https://localhost:8443
     depends_on:
       backend:
         condition: service_healthy
@@ -72,16 +70,10 @@ services:
       - 8443:8443
     volumes:
       - ./caddy_data:/data
-    command: |
-      sh -c 'echo $$CISO_ASSISTANT_URL "{
-      reverse_proxy /api/* backend:8000
-      reverse_proxy /* frontend:3000
-      tls internal
-      }" > Caddyfile && caddy run'
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
     networks:
       - ciso-network
 
-      
   dispatcher:
     container_name: ciso-dispatcher
     image: docker.sunet.se/ciso-assistant-dispatcher:latest
@@ -96,8 +88,8 @@ services:
       - DEBUG=True
       # CISO Assistant
       - API_URL=http://backend:8000/api
-      - USER_EMAIL=email
-      - USER_PASSWORD=1234
+      - USER_EMAIL=lundberg@sunet.se
+      - USER_PASSWORD=mira1000
       - AUTO_RENEW_SESSION=True
       - VERIFY_CERTIFICATE=False
       # Kafka

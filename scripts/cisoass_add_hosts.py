@@ -40,12 +40,14 @@ class Domain:
     name: str | None = field(default=None)
 
     @classmethod
-    def from_obj(cls, obj: FolderRead | ParentFolder | str) -> Self:
+    def from_obj(cls, obj: FolderRead | ParentFolder | str | dict) -> Self:
         match obj:
             case FolderRead() | ParentFolder():
                 return cls(id=obj.id, name=obj.name)
             case str():
                 return cls(id=obj)
+            case dict():
+                return cls(id=obj["id"], name=obj.get("name"))
             case _:
                 raise NotImplementedError(f"Unknown domain type {type(obj)}")
 
@@ -59,28 +61,22 @@ class Asset:
     children_assets: list[Self] = field(default_factory=list)
 
     @classmethod
-    def from_obj(cls, obj: AssetRead | AssetWriteResponse | Dependency | str) -> Self:
+    def from_obj(cls, obj: AssetRead | AssetWriteResponse | Dependency | str | dict) -> Self:
         match obj:
             case AssetRead():
                 return cls(
                     id=obj.id,
                     name=obj.name,
                     domain=Domain.from_obj(obj.folder),
-                    parent_assets=(
-                        [Asset.from_obj(parent) for parent in obj.parent_assets]
-                    ),
-                    children_assets=(
-                        [Asset.from_obj(child) for child in obj.children_assets]
-                    ),
+                    parent_assets=([Asset.from_obj(parent) for parent in obj.parent_assets]),
+                    children_assets=([Asset.from_obj(child) for child in obj.children_assets]),
                 )
             case AssetWriteResponse():
                 return cls(
                     id=obj.id,
                     name=obj.name,
                     domain=Domain.from_obj(obj.folder),
-                    parent_assets=(
-                        [Asset.from_obj(parent) for parent in obj.parent_assets]
-                    ),
+                    parent_assets=([Asset.from_obj(parent) for parent in obj.parent_assets]),
                 )
             case Dependency():
                 return cls(
@@ -89,6 +85,17 @@ class Asset:
                 )
             case str():
                 return cls(id=obj)
+            case dict():
+                domain = None
+                if obj.get("domain_id"):
+                    domain = Domain(id=obj["domain_id"], name=obj.get("domain_name"))
+                parent_assets = [Asset.from_obj(p) for p in obj.get("parent_assets", [])]
+                return cls(
+                    id=obj["id"],
+                    name=obj.get("name"),
+                    domain=domain,
+                    parent_assets=parent_assets,
+                )
             case _:
                 raise NotImplementedError(f"Unknown asset type {type(obj)}")
 
@@ -110,6 +117,14 @@ class Host:
     containers: list[ServerContainerSchema] = field(default_factory=list)
     _config: list[HostConfigurationSchema] = field(default_factory=list)
     _service: Service | None = None
+
+    @classmethod
+    def from_obj(cls, obj: dict) -> Self:
+        return cls(
+            id=obj["id"],
+            name=obj["name"],
+            config=obj.get("config", {}),
+        )
 
     def _parse_config(self) -> dict[str, dict[str, Any]]:
         new_config: dict[str, dict[str, Any]] = {}
@@ -133,18 +148,11 @@ class Host:
     @property
     def service(self) -> Service | None:
         if not self._service and self.config:
-            if (
-                "hiera_meta" in self.config
-                and "meta_service_name" in self.config["hiera_meta"]
-            ):
-                self._service = Service(
-                    name=self.config["hiera_meta"]["meta_service_name"]
-                )
+            if "hiera_meta" in self.config and "meta_service_name" in self.config["hiera_meta"]:
+                self._service = Service(name=self.config["hiera_meta"]["meta_service_name"])
         return self._service
 
-    async def update_config(
-        self, client: AsyncHittadeClient, force: bool = False
-    ) -> None:
+    async def update_config(self, client: AsyncHittadeClient, force: bool = False) -> None:
         if not self.config or force:
             try:
                 self._config = await client.get_host_config(host_id=self.id)
@@ -154,9 +162,7 @@ class Host:
             self.config = self._parse_config()
         return None
 
-    async def update_host(
-        self, client: AsyncHittadeClient, force: bool = False
-    ) -> None:
+    async def update_host(self, client: AsyncHittadeClient, force: bool = False) -> None:
         if not self.details or force:
             try:
                 res = await client.get_host_details(host_id=self.id)
@@ -173,29 +179,15 @@ class Host:
         return None
 
 
-def get_ciso_client() -> AsyncCISOAssistantClient:
-    ciso_pat = ApiToken(token=os.environ.get("CISO_API_TOKEN"))
-    ciso_url = os.environ.get("CISO_URL")
-    if ciso_pat is None:
-        raise RuntimeError("Missing required environment variable: CISO_API_TOKEN")
-    if ciso_url is None:
-        raise RuntimeError("Missing required environment variable: CISO_URL")
-    return CisoClient(base_url=ciso_url, auth=ciso_pat, verify=False)
+def get_ciso_client(base_url: str, token: str, verify_tls: bool = True) -> AsyncCISOAssistantClient:
+    ciso_pat = ApiToken(token=token)
+    return CisoClient(base_url=base_url, auth=ciso_pat, verify=verify_tls)
 
 
-def get_hittade_client(verify_tls: bool = True) -> AsyncHittadeClient:
-    hittade_user = os.environ.get("HITTADE_USER")
-    hittade_pass = os.environ.get("HITTADE_PASSWORD")
-    hittade_url = os.environ.get("HITTADE_URL")
-    if hittade_user is None:
-        raise RuntimeError("Missing required environment variable: HITTADE_USER")
-    if hittade_pass is None:
-        raise RuntimeError("Missing required environment variable: HITTADE_PASSWORD")
-    if hittade_url is None:
-        raise RuntimeError("Missing required environment variable: HITTADE_URL")
+def get_hittade_client(base_url: str, username: str, password: str, verify_tls: bool = True) -> AsyncHittadeClient:
     return AsyncHittadeClient(
-        base_url=hittade_url,
-        auth=BasicAuth(username=hittade_user, password=hittade_pass),
+        base_url=base_url,
+        auth=BasicAuth(username=username, password=password),
         verify=verify_tls,
     )
 
@@ -207,15 +199,9 @@ async def get_hittade_hosts(client: AsyncHittadeClient) -> dict[str, Host]:
         page = await client.list_hosts(limit=100)
         while page is not None:
             # load one page of hosts from hittade
-            page_items = {
-                item.hostname: Host(id=item.id, name=item.hostname)
-                for item in page.items
-            }
+            page_items = {item.hostname: Host(id=item.id, name=item.hostname) for item in page.items}
             # update config for each host from hittade
-            config_updates = [
-                page_items[hostname].update_config(client, force=True)
-                for hostname in page_items
-            ]
+            config_updates = [page_items[hostname].update_config(client, force=True) for hostname in page_items]
             for ex in await asyncio.gather(*config_updates, return_exceptions=True):
                 if ex is not None:
                     # log any error when retrieving config
@@ -224,6 +210,7 @@ async def get_hittade_hosts(client: AsyncHittadeClient) -> dict[str, Host]:
             hosts.update(page_items)
             # load next page
             page = await client.next_page(page)
+    logger.info(f"Retrieved {len(hosts)=} hosts from Hittade")
     return hosts
 
 
@@ -235,9 +222,7 @@ def compile_hittade_services(hosts: dict[str, Host]) -> dict[str, list[str]]:
                 services[host.service.name].append(hostname)
             else:
                 services[host.service.name] = [hostname]
-    logger.info(
-        f"Found the following service tags for hosts in Hittade: {list(services.keys())}"
-    )
+    logger.info(f"Found the following service tags for hosts in Hittade: {list(services.keys())}")
     return services
 
 
@@ -250,9 +235,7 @@ async def get_current_domains(client: AsyncCISOAssistantClient) -> dict[str, Dom
             folders = await client.next_page(paged_result=folders)
 
     domain_map = {d.name: Domain.from_obj(d) for d in domains}
-    logger.info(
-        f"Current domains configured in CISO Assistant: {list(domain_map.keys())}"
-    )
+    logger.info(f"Current domains configured in CISO Assistant: {list(domain_map.keys())}")
     return domain_map
 
 
@@ -330,22 +313,38 @@ async def sync_hosts(
 
 
 async def main():
-    hittade_client = get_hittade_client(verify_tls=False)
-    ciso_client = get_ciso_client()
+    # Get credentials from environment variables
+    ciso_url = os.environ.get("CISO_URL")
+    ciso_token = os.environ.get("CISO_API_TOKEN")
+    hittade_url = os.environ.get("HITTADE_URL")
+    hittade_user = os.environ.get("HITTADE_USER")
+    hittade_pass = os.environ.get("HITTADE_PASSWORD")
 
+    if not all([ciso_url, ciso_token, hittade_url, hittade_user, hittade_pass]):
+        raise RuntimeError(
+            "Missing required environment variables: "
+            "CISO_URL, CISO_API_TOKEN, HITTADE_URL, HITTADE_USER, HITTADE_PASSWORD"
+        )
+
+    hittade_client = get_hittade_client(
+        base_url=hittade_url, username=hittade_user, password=hittade_pass, verify_tls=False
+    )
+    ciso_client = get_ciso_client(base_url=ciso_url, token=ciso_token, verify_tls=False)
+
+    # hittade
+    # get hosts
     hosts = await get_hittade_hosts(client=hittade_client)
-    logger.info(f"Retrieved {len(hosts)=} hosts from Hittade")
+    # get services
     services = compile_hittade_services(hosts)
 
+    # ciso assistant
     # get current domains
     domains = await get_current_domains(client=ciso_client)
     # get current assets
     assets = await get_current_assets(client=ciso_client)
 
     # Sync hosts Hittade -> CISO Assistant
-    await sync_hosts(
-        client=ciso_client, services=services, domains=domains, assets=assets
-    )
+    await sync_hosts(client=ciso_client, services=services, domains=domains, assets=assets)
 
 
 if __name__ == "__main__":
