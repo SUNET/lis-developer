@@ -88,8 +88,8 @@ services:
       - DEBUG=True
       # CISO Assistant
       - API_URL=http://backend:8000/api
-      - USER_EMAIL=lundberg@sunet.se
-      - USER_PASSWORD=mira1000
+      - USER_EMAIL=admin@example.com
+      - USER_PASSWORD=abcd1234
       - AUTO_RENEW_SESSION=True
       - VERIFY_CERTIFICATE=False
       # Kafka
